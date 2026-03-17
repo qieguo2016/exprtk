@@ -1,0 +1,30 @@
+# Git worktrees
+.worktrees/
+
+# C++ 
+bin/
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.so
+*.dylib
+*.dll
+core
+a.out
+
+# Python
+.venv/
+__pycache__/
+
+# IDE
+.cursor
+.claude
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

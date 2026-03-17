@@ -1,0 +1,133 @@
+#ifndef EXPRTK_SRC_TIMER_HPP
+#define EXPRTK_SRC_TIMER_HPP
+
+#include "common.hpp"
+#include "extras.hpp"
+
+#if defined(_MSC_VER) || defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+#   ifndef NOMINMAX
+#      define NOMINMAX
+#   endif
+#   ifndef WIN32_LEAN_AND_MEAN
+#      define WIN32_LEAN_AND_MEAN
+#   endif
+#   include <windows.h>
+#   include <ctime>
+#else
+#   include <ctime>
+#   include <sys/time.h>
+#   include <sys/types.h>
+#endif
+
+namespace exprtk
+{
+   class timer
+   {
+   public:
+
+      #if defined(_MSC_VER) || defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+      timer()
+      : in_use_(false)
+      , start_time_{ {0, 0} }
+      , stop_time_ { {0, 0} }
+      {
+         QueryPerformanceFrequency(&clock_frequency_);
+      }
+
+      inline void start()
+      {
+         in_use_ = true;
+         QueryPerformanceCounter(&start_time_);
+      }
+
+      inline void stop()
+      {
+         QueryPerformanceCounter(&stop_time_);
+         in_use_ = false;
+      }
+
+      inline double time() const
+      {
+         return (1.0 * (stop_time_.QuadPart - start_time_.QuadPart)) / (1.0 * clock_frequency_.QuadPart);
+      }
+
+      #else
+
+      timer()
+      : in_use_(false)
+      {
+         start_time_.tv_sec  = 0;
+         start_time_.tv_usec = 0;
+
+         stop_time_.tv_sec   = 0;
+         stop_time_.tv_usec  = 0;
+      }
+
+      inline void start()
+      {
+         in_use_ = true;
+         gettimeofday(&start_time_,0);
+      }
+
+      inline void stop()
+      {
+         gettimeofday(&stop_time_, 0);
+         in_use_ = false;
+      }
+
+      inline unsigned long long int usec_time() const
+      {
+         if (!in_use_)
+         {
+            if (stop_time_.tv_sec >= start_time_.tv_sec)
+            {
+               return 1000000LLU * static_cast<details::_uint64_t>(stop_time_.tv_sec  - start_time_.tv_sec ) +
+                                   static_cast<details::_uint64_t>(stop_time_.tv_usec - start_time_.tv_usec) ;
+            }
+            else
+               return std::numeric_limits<details::_uint64_t>::max();
+         }
+         else
+            return std::numeric_limits<details::_uint64_t>::max();
+      }
+
+      inline double time() const
+      {
+         return usec_time() * 0.000001;
+      }
+
+      #endif
+
+      inline bool in_use() const
+      {
+         return in_use_;
+      }
+
+   private:
+
+      bool in_use_;
+
+      #if defined(_MSC_VER) || defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+         LARGE_INTEGER start_time_;
+         LARGE_INTEGER stop_time_;
+         LARGE_INTEGER clock_frequency_;
+      #else
+         struct timeval start_time_;
+         struct timeval stop_time_;
+      #endif
+   };
+
+   template <typename T>
+   struct type_defs
+   {
+      typedef symbol_table<T>         symbol_table_t;
+      typedef expression<T>           expression_t;
+      typedef parser<T>               parser_t;
+      typedef parser_error::type      error_t;
+      typedef function_compositor<T>  compositor_t;
+      typedef typename compositor_t::function function_t;
+   };
+
+} // namespace exprtk
+
+#endif // EXPRTK_SRC_TIMER_HPP
