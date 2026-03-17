@@ -18,9 +18,14 @@ BIN_TARGETS      := $(addprefix $(BIN_DIR)/,$(BUILD_LIST))
 
 all: $(BIN_TARGETS)
 
-$(BIN_TARGETS): $(BIN_DIR)/%: %.cpp src/exprtk.hpp
+# Regenerate single-header exprtk_single.hpp from src/*.hpp (run after src changes)
+build:
+	@python3 scripts/merge_hpp.py
+
+exprtk_%: exprtk_%.cpp src/exprtk.hpp
 	@mkdir -p $(BIN_DIR)
-	$(COMPILER) $(OPTIONS) -Isrc -o $@ $< $(LINKER_OPT)
+	@echo "Building $(BIN_DIR)/exprtk_$* from $<"
+	$(COMPILER) $(OPTIONS) -Isrc -o $(BIN_DIR)/exprtk_$* $< $(LINKER_OPT)
 
 strip_bin :
 	@for f in $(BIN_TARGETS); do if [ -f $$f ]; then strip -s $$f; echo $$f; fi done;
@@ -40,5 +45,4 @@ pgo: test/exprtk_benchmark.cpp src/exprtk.hpp
 	$(COMPILER) $(BASE_OPTIONS) -O3 -DNDEBUG -march=native -Isrc -fprofile-use -o $(BIN_DIR)/exprtk_benchmark test/exprtk_benchmark.cpp $(LINKER_OPT)
 
 clean:
-	rm -rf $(BIN_DIR)
-	rm -f core.* *~ *.o *.bak *stackdump gmon.out *.gcda *.gcno *.gcnor *.gch
+	rm -f core.* *~ *.o *.bak *stackdump gmon.out *.gcda *.gcno *.gcnor *.gch bin/*
