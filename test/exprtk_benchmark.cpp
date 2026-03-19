@@ -22,6 +22,7 @@
 #include <fstream>
 #include <string>
 #include <deque>
+#include <map>
 
 #include "exprtk.hpp"
 
@@ -107,7 +108,7 @@ void run_exprtk_benchmark(T& x, T& y,
    timer.stop();
 
    if (T(0) != total)
-      printf("[exprtk] Total Time:%12.8f  Rate:%14.3fevals/sec Expression: %s\n",
+      printf("[exprtk] Total Time:%12.8f  Rate:%14.3f evals/sec Expression: %s\n",
              timer.time(),
              count / timer.time(),
              expr_string.c_str());
@@ -138,7 +139,7 @@ void run_native_benchmark(T& x, T& y, NativeFunction f, const std::string& expr_
    timer.stop();
 
    if (T(0) != total)
-      printf("[native] Total Time:%12.8f  Rate:%14.3fevals/sec Expression: %s\n",
+      printf("[native] Total Time:%12.8f  Rate:%14.3f evals/sec Expression: %s\n",
              timer.time(),
              count / timer.time(),
              expr_string.c_str());
@@ -174,7 +175,7 @@ bool run_parse_benchmark(exprtk::symbol_table<T>& symbol_table)
 
       timer.stop();
 
-      printf("[parse] Total Time:%12.8f  Rate:%14.3fparse/sec Expression: %s\n",
+      printf("[parse] Total Time:%12.8f  Rate:%14.3f parse/sec Expression: %s\n",
              timer.time(),
              rounds / timer.time(),
              global_expression_list[i].c_str());
@@ -290,17 +291,30 @@ struct native
 
 double pgo_primer();
 void perform_file_based_benchmark(const std::string& file_name, const std::size_t& rounds = 100000);
+void perform_special_benchmark(const std::size_t& rounds, bool benchmark_parse = false);
 
 int main(int argc, char* argv[])
 {
    if (argc >= 2)
    {
-      const std::string file_name = argv[1];
+      const std::string arg_1 = argv[1];
+
+      if (arg_1 == "special_parse") {
+         size_t rounds = argc >= 3 ? atoi(argv[2]) : 34567;
+         perform_special_benchmark(rounds, true);
+         return 0;
+      }
+
+      if (arg_1 == "special_eval") {
+         size_t rounds = argc >= 3 ? atoi(argv[2]) : 3456789;
+         perform_special_benchmark(rounds, false);
+         return 0;
+      }
 
       if (argc == 2)
-         perform_file_based_benchmark(file_name);
+         perform_file_based_benchmark(arg_1);
       else
-         perform_file_based_benchmark(file_name,atoi(argv[2]));
+         perform_file_based_benchmark(arg_1,atoi(argv[2]));
 
       return 0;
    }
@@ -564,4 +578,284 @@ void perform_file_based_benchmark(const std::string& file_name, const std::size_
 
    printf("[*] Total Single Eval Time: %9.3fms\n",
           single_eval_total_time / 1000000.0);
+}
+
+
+template<typename T>
+class RoundZero : public exprtk::ifunction<T> {
+public:
+    RoundZero() : exprtk::ifunction<T>(3) {}
+    inline T operator()(const T& val, const T& bound, const T& default_val) {
+        if (std::abs(val) < bound) {
+            return default_val;
+        }
+        return val;
+    }
+};
+
+template<typename T>
+class GetInRange : public exprtk::ifunction<T> {
+public:
+    GetInRange() : exprtk::ifunction<T>(3) {}
+    inline T operator()(const T& val, const T& min_val, const T& max_val) {
+        T new_val = std::max(val, min_val);
+        new_val = std::min(new_val, max_val);
+        return new_val;
+    }
+};
+
+template<typename T>
+class BottomLimit : public exprtk::ifunction<T> {
+public:
+    BottomLimit() : exprtk::ifunction<T>(1) {}
+    inline T operator()(const T& val) {
+        if (val < 1e-6) {
+            return 1e-6;
+        }
+        return val;
+    }
+};
+
+template<typename T>
+class ZeroCeiling : public exprtk::ifunction<T> {
+public:
+    ZeroCeiling() : exprtk::ifunction<T>(1) {}
+    inline T operator()(const T& val) {
+        if (val < 0) {
+            return 0;
+        }
+        return val;
+    }
+};
+
+template<typename T>
+class TransPos : public exprtk::ifunction<T> {
+public:
+    TransPos() : exprtk::ifunction<T>(1) {}
+    inline T operator()(const T& val) {
+        if (val < 1) {
+            return 10000;
+        }
+        return val;
+    }
+};
+
+void perform_special_benchmark(const std::size_t& rounds, bool benchmark_parse)
+{
+
+   exprtk::symbol_table<double> symbol_table;
+
+   static RoundZero<double> round_zero;
+   symbol_table.add_function("round_zero", round_zero);
+
+   static GetInRange<double> get_in_range;
+   symbol_table.add_function("get_in_range", get_in_range);
+
+   static BottomLimit<double> bottom_limit;
+   symbol_table.add_function("bottom_limit", bottom_limit);
+
+   static ZeroCeiling<double> zero_ceiling;
+   symbol_table.add_function("zero_ceiling", zero_ceiling);
+   symbol_table.add_function("trans_pos", zero_ceiling);   
+
+   static const char* complex_expression = R"CEXPR(
+e := get_in_range(e,0,1);
+f := get_in_range(f,0,1);
+n := get_in_range(n,0,1);
+p := get_in_range(p,0,1);
+r := get_in_range(r,0,1);
+x := get_in_range(x,0,1);
+ab := get_in_range(ab,0,1);
+al := 1;
+an := 1;
+ao := 1;
+ap := 1;
+aq := 1;
+ar := 1;
+as := 1;
+at := 1;
+au := 1;
+av := 1;
+aw := 1;
+bj := get_in_range(bj,0,1);
+bk := get_in_range(bk,0,1);
+bl := 1;
+bo := get_in_range(bo,0,200);
+bp := get_in_range(bp,0,1);
+bu := get_in_range(bu,0,1);
+m := f;
+o := n;
+q := p;
+s := r;
+bt := bp;
+by := bu;
+cc := bo;
+f := bottom_limit(m * i + h)^g;
+l := bottom_limit(1 / (1 + ba))^k;
+n := bottom_limit(m * (s + q + bk) * (0.8*n + 0.2*ab) * c + b)^a;
+t := bottom_limit(m * (s + q + bk) * w + v)^u;
+x := bottom_limit(x * aa + z)^y;
+ag := bottom_limit(m * (s + q + bk) * (0.8*o + 0.2*ab) * min(480, if((ak == 0), aj, ak)+1)/480 * ae*(1-e+0.16) + ad)^ac;
+ai := bottom_limit(1 / (1 + bb))^ah;
+az := bottom_limit(1 / (1 + bc))^ay;
+bf := bottom_limit(bj * bi + bh)^bg;
+bo := bottom_limit(m * bo * cb + ca)^bz;
+bp := bottom_limit(bp*bs+br)^bq;
+bu := bottom_limit(bu*bx+bw)^bv;
+ba := ba;
+bb := bb;
+bc := bc;
+bd := ak;
+be := bottom_limit(m * (s + q + bk) * o);
+(f*t*bo*n*ag*l*az*ai*an*bf*ap*aq*ar*as*at*au*av*aw*ao*bp*bu*x) ^ 0.5;
+)CEXPR";
+
+   std::map<std::string, double> default_vars = {
+      {"a", 23.7498},
+      {"b", 1.0},
+      {"c", 10438.119},
+      {"d", 62667.409091},
+      {"e", 0.0},
+      {"f", 1.212228684328808e-16},
+      {"g", 15.52932},
+      {"h", 1e-08},
+      {"i", 12.9812},
+      {"j", 0.0072737499140203},
+      {"k", 1.0},
+      {"l", 0.002717391304347826},
+      {"m", 0.0072737499140203},
+      {"n", 1.0},
+      {"o", 0.0},
+      {"p", 0.0},
+      {"q", 0.0},
+      {"r", 0.0},
+      {"s", 0.0},
+      {"t", 1.0},
+      {"u", 0.0},
+      {"v", 1.0},
+      {"w", 3.3754},
+      {"x", 1.0671664585969973},
+      {"y", 0.4},
+      {"z", 1.0},
+      {"aa", 0.3},
+      {"ab", 0.0},
+      {"ac", 18.0},
+      {"ad", 1.0},
+      {"ae", 100000.0},
+      {"af", 1e-06},
+      {"ag", 1.0},
+      {"ah", 2.6},
+      {"ai", 2.1320415859514218e-07},
+      {"aj", 3.8753204937},
+      {"ak", 3.77721},
+      {"al", 1.0},
+      {"am", 0.0},
+      {"an", 1.0},
+      {"ao", 1.0},
+      {"ap", 1.0},
+      {"aq", 1.0},
+      {"ar", 1.0},
+      {"as", 1.0},
+      {"at", 1.0},
+      {"au", 1.0},
+      {"av", 1.0},
+      {"aw", 1.0},
+      {"ax", 1e-06},
+      {"ay", 1.2},
+      {"az", 0.0008336478176364468},
+      {"ba", 367.0},
+      {"bb", 367.0},
+      {"bc", 367.0},
+      {"bd", 3.77721},
+      {"be", 1e-06},
+      {"bf", 2.1489911103020884},
+      {"bg", 43.48179},
+      {"bh", 1.0},
+      {"bi", 16.1136},
+      {"bj", 0.0011015052441507578},
+      {"bk", 0.0},
+      {"bl", 1.0},
+      {"bm", 0.0},
+      {"bn", 0.5588802695274353},
+      {"bo", 710.1982778818003},
+      {"bp", 4.223250444224022},
+      {"bq", 0.898},
+      {"br", 2.2389},
+      {"bs", 4.4369},
+      {"bt", 0.6164584159851074},
+      {"bu", 2.897342670425497},
+      {"bv", 2.1587},
+      {"bw", 0.4517},
+      {"bx", 4.5996},
+      {"by", 0.25767087936401367},
+      {"bz", 6.0438},
+      {"ca", 1.0},
+      {"cb", 13.9199},
+      {"cc", 19.391334533691406}
+   };
+
+   for (const auto& kv : default_vars)
+   {
+      if (!symbol_table.create_variable(kv.first, kv.second))
+      {
+         printf("[perform_special_benchmark] - Failed to register variable: %s\n", kv.first.c_str());
+         return;
+      }
+   }
+
+   exprtk::expression<double> expression;
+   expression.register_symbol_table(symbol_table);
+
+   exprtk::timer timer;
+   exprtk::parser<double> parser;
+
+   if (benchmark_parse) {
+      timer.start();
+      for (std::size_t r = 0; r < rounds; ++r)
+      {
+         if (!parser.compile(complex_expression, expression))
+         {
+            printf("[perform_special_benchmark] - Parser Error: %s\n",
+                   parser.error().c_str());
+            return;
+         }
+      }
+      timer.stop();
+   
+      printf("[perform_special_benchmark-parse] Total Time:%12.8f  Rate:%14.3f parse/sec\n",
+             timer.time(),
+             rounds / timer.time());
+      return;
+   } 
+
+   
+   if (!parser.compile(complex_expression, expression))
+   {
+      printf("[perform_special_benchmark] - Parser Error: %s\n", parser.error().c_str());
+      return;
+   }
+
+   double total = 0.0;
+   timer.start();
+
+   std::vector<std::string> vars = {"e", "f", "n", "p", "r", "x", "ab", "bj", "bk",
+       "bo", "bp", "bu"};
+   for (std::size_t r = 0; r < rounds; ++r)
+   {
+      for (auto& variable : vars) {
+         symbol_table.variable_ref(variable) = default_vars.find(variable)->second + global_delta;
+      }
+      total += expression.value();
+   }
+
+   timer.stop();
+
+   if (0.0 != total)
+   {
+      printf("[perform_special_benchmark-eval] Total Time:%12.8f  Rate:%14.3f evals/sec\n",
+             timer.time(),
+             rounds / timer.time());
+   } else {
+      printf("[perform_special_benchmark-eval] - Error running benchmark (zero total)\n");
+   }
 }
