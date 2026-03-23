@@ -1,7 +1,7 @@
 
 COMPILER         := -c++
 #COMPILER        := -clang++
-OPTIMIZATION_OPT := -O2 -DNDEBUG -Dexprtk_disable_caseinsensitivity
+OPTIMIZATION_OPT := -O2 -DNDEBUG
 BASE_OPTIONS     := -pedantic-errors -Wall -Wextra -Werror -Wno-long-long
 OPTIONS          := $(BASE_OPTIONS) $(OPTIMIZATION_OPT)
 LINKER_OPT       := -L/usr/lib -lstdc++ -lm
