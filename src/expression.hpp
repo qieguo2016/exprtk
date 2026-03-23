@@ -6,6 +6,7 @@
 #include "nodes_compound.hpp"
 #include "nodes_assign.hpp"
 #include "lexer.hpp"
+#include "arena_allocator.hpp"
 
 namespace exprtk
 {
@@ -76,6 +77,7 @@ namespace exprtk
          : ref_count(0)
          , expr     (0)
          , results  (0)
+         , arena    (0)
          , retinv_null(false)
          , return_invoked(&retinv_null)
          {}
@@ -84,6 +86,7 @@ namespace exprtk
          : ref_count(1)
          , expr     (e)
          , results  (0)
+         , arena    (0)
          , retinv_null(false)
          , return_invoked(&retinv_null)
          {}
@@ -101,8 +104,15 @@ namespace exprtk
                {
                   switch (local_data_list[i].type)
                   {
-                     case e_expr      : delete reinterpret_cast<expression_ptr>(local_data_list[i].pointer);
-                                        break;
+                     case e_expr      :
+                        {
+                           expression_ptr eptr = reinterpret_cast<expression_ptr>(local_data_list[i].pointer);
+                           if (eptr)
+                           {
+                              eptr->destroy_self();
+                           }
+                        }
+                        break;
 
                      case e_vecholder : delete reinterpret_cast<vector_holder_ptr>(local_data_list[i].pointer);
                                         break;
@@ -125,6 +135,10 @@ namespace exprtk
             {
                delete results;
             }
+
+            // Arena is destroyed last; node destructors have already been called
+            // by destroy_node() above, so it is safe to bulk-free the pages now.
+            delete arena;
          }
 
          static inline cntrl_blck_ptr_t create(expression_ptr e)
@@ -152,6 +166,7 @@ namespace exprtk
          expression_ptr expr;
          local_data_list_t local_data_list;
          results_context_t* results;
+         details::arena_allocator* arena;
          bool  retinv_null;
          bool* return_invoked;
 
@@ -407,6 +422,17 @@ namespace exprtk
          if (control_block_)
          {
             control_block_->return_invoked = retinvk_ptr;
+         }
+      }
+
+      inline void set_arena(details::arena_allocator* arena)
+      {
+         if (control_block_)
+         {
+            // Transfer ownership of arena to the control_block.
+            // Any previously owned arena is discarded (should not happen in practice).
+            delete control_block_->arena;
+            control_block_->arena = arena;
          }
       }
 
