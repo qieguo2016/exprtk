@@ -30,6 +30,19 @@ namespace exprtk
       private:
 
          template <typename node_type>
+         static inline void destroy_arena_node(expression_node<typename node_type::value_type>* node)
+         {
+            static_cast<node_type*>(node)->~node_type();
+         }
+
+         template <typename node_type>
+         inline void mark_arena_node(node_type* node) const
+         {
+            node->arena_managed_    = true;
+            node->arena_destroy_fn_ = &destroy_arena_node<node_type>;
+         }
+
+         template <typename node_type>
          inline node_type* arena_new() const
          {
             if (arena_)
@@ -39,7 +52,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type();
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -56,7 +69,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -73,7 +86,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -90,7 +103,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -107,7 +120,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -124,7 +137,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -141,7 +154,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -158,7 +171,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -175,7 +188,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -192,7 +205,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -209,7 +222,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -226,7 +239,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -243,7 +256,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -260,7 +273,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -277,7 +290,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -294,7 +307,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -311,7 +324,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -328,7 +341,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -345,7 +358,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7, t8);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -362,7 +375,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7, t8, t9);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -379,7 +392,7 @@ namespace exprtk
                if (mem)
                {
                   node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10);
-                  node->arena_managed_ = true;
+                  mark_arena_node(node);
                   return node;
                }
             }
@@ -706,7 +719,7 @@ namespace exprtk
                if (mem)
                {
                   result = ::new (mem) node_type(t1, t2, t3);
-                  result->arena_managed_ = true;
+                  mark_arena_node(static_cast<node_type*>(result));
                   result->node_depth();
                   return result;
                }
@@ -729,7 +742,7 @@ namespace exprtk
                if (mem)
                {
                   result = ::new (mem) node_type(t1, t2, t3, t4);
-                  result->arena_managed_ = true;
+                  mark_arena_node(static_cast<node_type*>(result));
                   result->node_depth();
                   return result;
                }
@@ -754,7 +767,7 @@ namespace exprtk
                if (mem)
                {
                   result = ::new (mem) node_type(t1, t2, t3, t4, t5);
-                  result->arena_managed_ = true;
+                  mark_arena_node(static_cast<node_type*>(result));
                   result->node_depth();
                   return result;
                }
@@ -779,7 +792,7 @@ namespace exprtk
                if (mem)
                {
                   result = ::new (mem) node_type(t1, t2, t3, t4, t5, t6);
-                  result->arena_managed_ = true;
+                  mark_arena_node(static_cast<node_type*>(result));
                   result->node_depth();
                   return result;
                }
@@ -805,7 +818,7 @@ namespace exprtk
                if (mem)
                {
                   result = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7);
-                  result->arena_managed_ = true;
+                  mark_arena_node(static_cast<node_type*>(result));
                   result->node_depth();
                   return result;
                }
@@ -822,14 +835,7 @@ namespace exprtk
                           "type: %03d addr: %p\n",
                           static_cast<int>(e->type()),
                           reinterpret_cast<void*>(e)));
-            if (e->arena_managed_)
-            {
-               e->~expression_node<T>();
-            }
-            else
-            {
-               delete e;
-            }
+            e->destroy_self();
             e = 0;
          }
       };

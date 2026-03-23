@@ -107,14 +107,9 @@ namespace exprtk
                      case e_expr      :
                         {
                            expression_ptr eptr = reinterpret_cast<expression_ptr>(local_data_list[i].pointer);
-                           if (eptr && eptr->arena_managed_)
+                           if (eptr)
                            {
-                              // Arena-managed: call destructor only; memory freed by arena.
-                              eptr->~expression_node<T>();
-                           }
-                           else
-                           {
-                              delete eptr;
+                              eptr->destroy_self();
                            }
                         }
                         break;

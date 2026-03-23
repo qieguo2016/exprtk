@@ -601,15 +601,31 @@ namespace exprtk
          typedef node_collector_interface<expression_node<T> > nci_t;
          typedef typename nci_t::noderef_list_t noderef_list_t;
          typedef node_depth_base<expression_node<T> > ndb_t;
+         typedef void (*arena_destroy_fn_t)(expression_ptr);
 
          expression_node()
          : arena_managed_(false)
+         , arena_destroy_fn_(0)
          {}
 
          virtual ~expression_node()
          {}
 
          bool arena_managed_;
+         arena_destroy_fn_t arena_destroy_fn_;
+
+         inline void destroy_self()
+         {
+            if (arena_managed_)
+            {
+               assert(arena_destroy_fn_);
+               arena_destroy_fn_(this);
+            }
+            else
+            {
+               delete this;
+            }
+         }
 
          inline virtual T value() const
          {
@@ -973,16 +989,7 @@ namespace exprtk
             {
                node_ptr_t& node = *node_delete_list[i];
                exprtk_debug(("ncd::delete_nodes() - deleting: %p\n", reinterpret_cast<void*>(node)));
-               if (node->arena_managed_)
-               {
-                  // Arena-managed node: call destructor only.
-                  // The arena itself frees the underlying memory in bulk.
-                  node->~Node();
-               }
-               else
-               {
-                  delete node;
-               }
+               node->destroy_self();
                node = reinterpret_cast<node_ptr_t>(0);
             }
          }

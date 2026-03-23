@@ -410,10 +410,7 @@ namespace exprtk
          {
             if (node)
             {
-               if (node->arena_managed_)
-                  node->~expression_node_t();
-               else
-                  delete node;
+               node->destroy_self();
                node = 0;
             }
          }
@@ -2356,6 +2353,32 @@ namespace exprtk
          details::arena_allocator* arena = new details::arena_allocator();
          node_allocator_.set_arena(arena);
 
+         struct scoped_arena_cleanup
+         {
+            scoped_arena_cleanup(details::node_allocator& node_allocator,
+                                 details::arena_allocator*& arena)
+            : node_allocator_(node_allocator)
+            , arena_(arena)
+            {}
+
+            ~scoped_arena_cleanup()
+            {
+               node_allocator_.set_arena(0);
+               delete arena_;
+               arena_ = 0;
+            }
+
+            inline void release()
+            {
+               node_allocator_.set_arena(0);
+               arena_ = 0;
+            }
+
+         private:
+            details::node_allocator&   node_allocator_;
+            details::arena_allocator*& arena_;
+         } arena_cleanup(node_allocator_, arena);
+
          expression_generator_.set_allocator(node_allocator_);
 
          if (expression_string.empty())
@@ -2428,12 +2451,10 @@ namespace exprtk
             expr.set_expression(e);
             expr.set_retinvk(retinvk_ptr);
             expr.set_arena(arena);
-            arena = 0;
+            arena_cleanup.release();
 
             register_local_vars(expr);
             register_return_results(expr);
-
-            node_allocator_.set_arena(0);
 
             return !(!expr);
          }
@@ -2456,12 +2477,6 @@ namespace exprtk
             dec_.clear    ();
             sem_.cleanup  ();
             return_cleanup();
-
-            // Free the arena AFTER cleanup so scope-element nodes (which may be
-            // arena-managed) are properly destructed before their memory is reclaimed.
-            delete arena;
-            arena = 0;
-            node_allocator_.set_arena(0);
 
             expr = expression_t();
 
