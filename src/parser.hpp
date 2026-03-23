@@ -380,18 +380,18 @@ namespace exprtk
             switch (se.type)
             {
                case scope_element::e_literal    : delete reinterpret_cast<T*>(se.data);
-                                                  delete se.var_node;
+                                                  free_node_ptr(se.var_node);
                                                   break;
 
                case scope_element::e_variable   : delete reinterpret_cast<T*>(se.data);
-                                                  delete se.var_node;
+                                                  free_node_ptr(se.var_node);
                                                   break;
 
                case scope_element::e_vector     : delete[] reinterpret_cast<T*>(se.data);
                                                   delete se.vec_node;
                                                   break;
 
-               case scope_element::e_vecelem    : delete se.var_node;
+               case scope_element::e_vecelem    : free_node_ptr(se.var_node);
                                                   break;
 
                #ifndef exprtk_disable_string_capabilities
@@ -404,6 +404,18 @@ namespace exprtk
             }
 
             se.clear();
+         }
+
+         inline void free_node_ptr(expression_node_ptr& node)
+         {
+            if (node)
+            {
+               if (node->arena_managed_)
+                  node->~expression_node_t();
+               else
+                  delete node;
+               node = 0;
+            }
          }
 
          inline void cleanup()
@@ -2341,6 +2353,9 @@ namespace exprtk
             return false;
          }
 
+         details::arena_allocator* arena = new details::arena_allocator();
+         node_allocator_.set_arena(arena);
+
          expression_generator_.set_allocator(node_allocator_);
 
          if (expression_string.empty())
@@ -2412,9 +2427,13 @@ namespace exprtk
 
             expr.set_expression(e);
             expr.set_retinvk(retinvk_ptr);
+            expr.set_arena(arena);
+            arena = 0;
 
             register_local_vars(expr);
             register_return_results(expr);
+
+            node_allocator_.set_arena(0);
 
             return !(!expr);
          }
@@ -2437,6 +2456,13 @@ namespace exprtk
             dec_.clear    ();
             sem_.cleanup  ();
             return_cleanup();
+
+            // Free the arena AFTER cleanup so scope-element nodes (which may be
+            // arena-managed) are properly destructed before their memory is reclaimed.
+            delete arena;
+            arena = 0;
+            node_allocator_.set_arena(0);
+
             expr = expression_t();
 
             return false;

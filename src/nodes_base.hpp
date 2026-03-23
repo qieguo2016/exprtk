@@ -3,6 +3,7 @@
 
 #include "common.hpp"
 #include "types.hpp"
+#include "arena_allocator.hpp"
 
 namespace exprtk
 {
@@ -601,8 +602,14 @@ namespace exprtk
          typedef typename nci_t::noderef_list_t noderef_list_t;
          typedef node_depth_base<expression_node<T> > ndb_t;
 
+         expression_node()
+         : arena_managed_(false)
+         {}
+
          virtual ~expression_node()
          {}
+
+         bool arena_managed_;
 
          inline virtual T value() const
          {
@@ -966,7 +973,16 @@ namespace exprtk
             {
                node_ptr_t& node = *node_delete_list[i];
                exprtk_debug(("ncd::delete_nodes() - deleting: %p\n", reinterpret_cast<void*>(node)));
-               delete node;
+               if (node->arena_managed_)
+               {
+                  // Arena-managed node: call destructor only.
+                  // The arena itself frees the underlying memory in bulk.
+                  node->~Node();
+               }
+               else
+               {
+                  delete node;
+               }
                node = reinterpret_cast<node_ptr_t>(0);
             }
          }
