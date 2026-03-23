@@ -1,0 +1,19 @@
+name: C/C++ CI
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@main
+    - name: c++ --version
+      run: c++ --version
+    - name: make all -j 8
+      run: make all -j 8
+    - name: exprtk_test
+      run: ./bin/exprtk_test
