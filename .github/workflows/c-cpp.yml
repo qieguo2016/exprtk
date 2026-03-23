@@ -13,7 +13,11 @@ jobs:
     - uses: actions/checkout@main
     - name: c++ --version
       run: c++ --version
-    - name: make all -j 8
-      run: make all -j 8
+    - name: make exprtk_test
+      run: make exprtk_test
     - name: exprtk_test
       run: ./bin/exprtk_test
+    - name: make example
+      run: make example
+    - name: make build
+      run: make build
