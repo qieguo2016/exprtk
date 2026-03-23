@@ -2,7 +2,7 @@
 COMPILER         := -c++
 #COMPILER        := -clang++
 OPTIMIZATION_OPT := -O2 -DNDEBUG
-BASE_OPTIONS     := -pedantic-errors -Wall -Wextra -Werror -Wno-long-long
+BASE_OPTIONS     := -std=c++17 -pedantic-errors -Wall -Wextra -Werror -Wno-long-long
 OPTIONS          := $(BASE_OPTIONS) $(OPTIMIZATION_OPT)
 LINKER_OPT       := -L/usr/lib -lstdc++ -lm
 # Suppress GCC var-tracking notes on very large template functions (e.g. run_test02).
