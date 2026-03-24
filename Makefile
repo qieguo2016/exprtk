@@ -1,5 +1,5 @@
 
-COMPILER         := -c++
+COMPILER         := c++
 #COMPILER        := -clang++
 OPTIMIZATION_OPT := -O2 -DNDEBUG
 BASE_OPTIONS     := -pedantic-errors -Wall -Wextra -Werror -Wno-long-long
@@ -24,9 +24,16 @@ build:
 
 all: $(BUILD_LIST)
 
-test: $(TEST_SRC)
+examples: $(EXAMPLE_SRC)
 
-example: $(EXAMPLE_SRC)
+# test/ would otherwise be picked up as this target; keep `make test` as a pure alias.
+.PHONY: test
+test: exprtk_test
+
+benchmark: exprtk_benchmark.cpp src/exprtk.hpp
+	@mkdir -p $(BIN_DIR)
+	@echo "Building $(BIN_DIR)/exprtk_benchmark"
+	$(COMPILER) $(OPTIONS) -I. -o $(BIN_DIR)/exprtk_benchmark $< $(LINKER_OPT)
 
 exprtk_%: exprtk_%.cpp src/exprtk.hpp
 	@mkdir -p $(BIN_DIR)
