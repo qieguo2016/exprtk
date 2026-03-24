@@ -14,6 +14,7 @@
 - Regenerate the merged single-header distribution after changing files in `src/`: `make build`
 - Clean generated artifacts: `make clean`
 
+
 ## Repository structure
 
 ├── Makefile       # Build Command
@@ -58,8 +59,26 @@ The main runtime flow is:
 3. Use `exprtk::parser<T>` to tokenize and compile an expression string into an AST owned by the expression object.
 4. Evaluate the compiled expression through `expression.value()` / `operator()`, which walks the compiled node tree.
 
+
 ## Working conventions for this repo
 
 - Make changes in `src/` first. If public distribution output must stay in sync, regenerate top-level `exprtk.hpp` afterwards with `make build`.
 - When changing parser or evaluation behavior, validate with `make exprtk_test && ./bin/exprtk_test`.
 - When changing public API or examples-facing behavior, also build at least one relevant target from `example/` to confirm include-path and integration behavior still work.
+
+
+## Benchmark progress
+
+1. `make build` — sync top-level `exprtk.hpp` from `src/` when headers changed.
+2. `make benchmark` — produce `./bin/exprtk_benchmark` (uses repo-root include path).
+3. Append several timed runs to one log (example: 5 rounds, 1000 iterations each, feature is arena_allocator):
+
+   ```bash
+   for i in $(seq 1 5); do
+     echo "## Base $i" >> benchmark_arena_allocator.md
+     ./bin/exprtk_benchmark 1000 >> benchmark_arena_allocator.md 2>&1
+     echo >> benchmark_arena_allocator.md
+   done
+   ```
+
+4. After optimizations, repeat steps 1–2 and run the same loop with a new heading prefix (e.g. `## Optimized $i`) so before/after blocks stay in one file.
