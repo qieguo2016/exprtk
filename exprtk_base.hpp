@@ -7,7 +7,6 @@
 #include <cassert>
 #include <cctype>
 #include <cmath>
-#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -5111,144 +5110,6 @@ namespace exprtk
 
 } // namespace exprtk
 
-// === arena_allocator.hpp ===
-namespace exprtk
-{
-   namespace details
-   {
-
-      // Arena allocator for AST nodes.
-      //
-      // Allocates nodes in contiguous 64KB pages using placement-new, keeping
-      // nodes from the same expression close together in memory and dramatically
-      // improving L1/L2 cache hit rates during value() tree-walk evaluation.
-      //
-      // Nodes larger than the page size fall back to heap allocation (tracked
-      // separately and freed individually).
-      //
-      // Lifetime: owned by expression::control_block; destroyed after all node
-      // destructors have been called by node_collection_destructor::delete_nodes.
-      class arena_allocator
-      {
-      public:
-
-         static const std::size_t page_size = 65536; // 64 KB pages
-
-         arena_allocator()
-         : current_page_(0)
-         , current_offset_(0)
-         {}
-
-         ~arena_allocator()
-         {
-            for (std::size_t i = 0; i < pages_.size(); ++i)
-            {
-               ::free(pages_[i]);
-            }
-
-            for (std::size_t i = 0; i < oversized_.size(); ++i)
-            {
-               ::free(oversized_[i]);
-            }
-         }
-
-         // Allocate size bytes aligned to align bytes.
-         // Returns a pointer to uninitialized memory, or NULL on failure.
-         void* allocate(const std::size_t size, const std::size_t align = sizeof(void*))
-         {
-            if (size > page_size)
-            {
-               // Oversized allocation: fall back to malloc, track separately.
-               void* ptr = ::malloc(size);
-               if (ptr)
-               {
-                  oversized_.push_back(ptr);
-               }
-               return ptr;
-            }
-
-            if (!try_allocate_from_current(size, align))
-            {
-               if (!add_page())
-               {
-                  return 0;
-               }
-            }
-
-            return allocate_from_current(size, align);
-         }
-
-         // Check whether a pointer falls within any arena-managed page.
-         // Used to determine if an expression_node's memory is arena-owned.
-         bool is_arena_ptr(const void* ptr) const
-         {
-            const char* p = static_cast<const char*>(ptr);
-
-            for (std::size_t i = 0; i < pages_.size(); ++i)
-            {
-               const char* page_start = static_cast<const char*>(pages_[i]);
-               if (p >= page_start && p < page_start + page_size)
-               {
-                  return true;
-               }
-            }
-
-            for (std::size_t i = 0; i < oversized_.size(); ++i)
-            {
-               if (ptr == oversized_[i])
-               {
-                  return true;
-               }
-            }
-
-            return false;
-         }
-
-      private:
-
-         arena_allocator(const arena_allocator&);
-         arena_allocator& operator=(const arena_allocator&);
-
-         bool add_page()
-         {
-            void* page = ::malloc(page_size);
-            if (!page) return false;
-            pages_.push_back(page);
-            current_page_   = page;
-            current_offset_ = 0;
-            return true;
-         }
-
-         bool try_allocate_from_current(const std::size_t size, const std::size_t align) const
-         {
-            if (!current_page_) return false;
-
-            const std::size_t aligned_offset = align_offset(current_offset_, align);
-            return (aligned_offset + size) <= page_size;
-         }
-
-         void* allocate_from_current(const std::size_t size, const std::size_t align)
-         {
-            const std::size_t aligned_offset = align_offset(current_offset_, align);
-            void* ptr = static_cast<char*>(current_page_) + aligned_offset;
-            current_offset_ = aligned_offset + size;
-            return ptr;
-         }
-
-         static std::size_t align_offset(const std::size_t offset, const std::size_t align)
-         {
-            return (offset + align - 1) & ~(align - 1);
-         }
-
-         std::vector<void*> pages_;
-         std::vector<void*> oversized_;
-         void*       current_page_;
-         std::size_t current_offset_;
-      };
-
-   } // namespace details
-} // namespace exprtk
-
 // === nodes_base.hpp ===
 namespace exprtk
 {
@@ -5846,31 +5707,9 @@ namespace exprtk
          typedef node_collector_interface<expression_node<T> > nci_t;
          typedef typename nci_t::noderef_list_t noderef_list_t;
          typedef node_depth_base<expression_node<T> > ndb_t;
-         typedef void (*arena_destroy_fn_t)(expression_ptr);
-
-         expression_node()
-         : arena_managed_(false)
-         , arena_destroy_fn_(0)
-         {}
 
          virtual ~expression_node()
          {}
-
-         bool arena_managed_;
-         arena_destroy_fn_t arena_destroy_fn_;
-
-         inline void destroy_self()
-         {
-            if (arena_managed_)
-            {
-               assert(arena_destroy_fn_);
-               arena_destroy_fn_(this);
-            }
-            else
-            {
-               delete this;
-            }
-         }
 
          inline virtual T value() const
          {
@@ -6234,7 +6073,7 @@ namespace exprtk
             {
                node_ptr_t& node = *node_delete_list[i];
                exprtk_debug(("ncd::delete_nodes() - deleting: %p\n", reinterpret_cast<void*>(node)));
-               node->destroy_self();
+               delete node;
                node = reinterpret_cast<node_ptr_t>(0);
             }
          }
@@ -19478,396 +19317,6 @@ namespace exprtk
       {
       public:
 
-         node_allocator()
-         : arena_(0)
-         {}
-
-         void set_arena(arena_allocator* arena)
-         {
-            arena_ = arena;
-         }
-
-         arena_allocator* get_arena() const
-         {
-            return arena_;
-         }
-
-      private:
-
-         template <typename node_type>
-         static inline void destroy_arena_node(expression_node<typename node_type::value_type>* node)
-         {
-            static_cast<node_type*>(node)->~node_type();
-         }
-
-         template <typename node_type>
-         inline void mark_arena_node(node_type* node) const
-         {
-            node->arena_managed_    = true;
-            node->arena_destroy_fn_ = &destroy_arena_node<node_type>;
-         }
-
-         template <typename node_type>
-         inline node_type* arena_new() const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type();
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type();
-         }
-
-         template <typename node_type, typename T1>
-         inline node_type* arena_new(T1& t1) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1);
-         }
-
-         template <typename node_type, typename T1>
-         inline node_type* arena_new_c(const T1& t1) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1);
-         }
-
-         template <typename node_type, typename T1, typename T2>
-         inline node_type* arena_new(const T1& t1, const T2& t2) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2);
-         }
-
-         template <typename node_type, typename T1, typename T2>
-         inline node_type* arena_new_cr(const T1& t1, T2& t2) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2);
-         }
-
-         template <typename node_type, typename T1, typename T2>
-         inline node_type* arena_new_rc(T1& t1, const T2& t2) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2);
-         }
-
-         template <typename node_type, typename T1, typename T2>
-         inline node_type* arena_new_rr(T1& t1, T2& t2) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2);
-         }
-
-         template <typename node_type, typename T1, typename T2>
-         inline node_type* arena_new_tt(T1 t1, T2 t2) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3>
-         inline node_type* arena_new_ttt(T1 t1, T2 t2, T3 t3) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4>
-         inline node_type* arena_new_tttt(T1 t1, T2 t2, T3 t3, T4 t4) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3>
-         inline node_type* arena_new_rrr(T1& t1, T2& t2, T3& t3) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4>
-         inline node_type* arena_new_rrrr(T1& t1, T2& t2, T3& t3, T4& t4) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4, typename T5>
-         inline node_type* arena_new_rrrrr(T1& t1, T2& t2, T3& t3, T4& t4, T5& t5) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4, t5);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3>
-         inline node_type* arena_new_ccc(const T1& t1, const T2& t2, const T3& t3) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4>
-         inline node_type* arena_new_cccc(const T1& t1, const T2& t2, const T3& t3, const T4& t4) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4, typename T5>
-         inline node_type* arena_new_ccccc(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4, t5);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
-         inline node_type* arena_new_cccccc(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4, t5, t6);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7>
-         inline node_type* arena_new_ccccccc(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6, const T7& t7) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4, t5, t6, t7);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8>
-         inline node_type* arena_new_cccccccc(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6, const T7& t7, const T8& t8) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7, t8);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4, t5, t6, t7, t8);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9>
-         inline node_type* arena_new_ccccccccc(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6, const T7& t7, const T8& t8, const T9& t9) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7, t8, t9);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4, t5, t6, t7, t8, t9);
-         }
-
-         template <typename node_type, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10>
-         inline node_type* arena_new_cccccccccc(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6, const T7& t7, const T8& t8, const T9& t9, const T10& t10) const
-         {
-            if (arena_)
-            {
-               const std::size_t align = alignof(node_type);
-               void* mem = arena_->allocate(sizeof(node_type), align);
-               if (mem)
-               {
-                  node_type* node = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10);
-                  mark_arena_node(node);
-                  return node;
-               }
-            }
-            return new node_type(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10);
-         }
-
-         arena_allocator* arena_;
-
-      public:
-
          template <typename ResultNode, typename OpType, typename ExprNode>
          inline expression_node<typename ResultNode::value_type>* allocate(OpType& operation, ExprNode (&branch)[1])
          {
@@ -19925,7 +19374,7 @@ namespace exprtk
          template <typename node_type>
          inline expression_node<typename node_type::value_type>* allocate() const
          {
-            return arena_new<node_type>();
+            return (new node_type());
          }
 
          template <typename node_type,
@@ -19944,7 +19393,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate(T1& t1) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new<node_type>(t1);
+            result = (new node_type(t1));
             result->node_depth();
             return result;
          }
@@ -19953,7 +19402,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_c(const T1& t1) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_c<node_type>(t1);
+            result = (new node_type(t1));
             result->node_depth();
             return result;
          }
@@ -19963,7 +19412,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate(const T1& t1, const T2& t2) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new<node_type>(t1, t2);
+            result = (new node_type(t1, t2));
             result->node_depth();
             return result;
          }
@@ -19973,7 +19422,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_cr(const T1& t1, T2& t2) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_cr<node_type>(t1, t2);
+            result = (new node_type(t1, t2));
             result->node_depth();
             return result;
          }
@@ -19983,7 +19432,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_rc(T1& t1, const T2& t2) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_rc<node_type>(t1, t2);
+            result = (new node_type(t1, t2));
             result->node_depth();
             return result;
          }
@@ -19993,7 +19442,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_rr(T1& t1, T2& t2) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_rr<node_type>(t1, t2);
+            result = (new node_type(t1, t2));
             result->node_depth();
             return result;
          }
@@ -20003,7 +19452,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_tt(T1 t1, T2 t2) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_tt<node_type, T1, T2>(t1, t2);
+            result = (new node_type(t1, t2));
             result->node_depth();
             return result;
          }
@@ -20013,7 +19462,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_ttt(T1 t1, T2 t2, T3 t3) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_ttt<node_type, T1, T2, T3>(t1, t2, t3);
+            result = (new node_type(t1, t2, t3));
             result->node_depth();
             return result;
          }
@@ -20023,7 +19472,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_tttt(T1 t1, T2 t2, T3 t3, T4 t4) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_tttt<node_type, T1, T2, T3, T4>(t1, t2, t3, t4);
+            result = (new node_type(t1, t2, t3, t4));
             result->node_depth();
             return result;
          }
@@ -20033,7 +19482,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_rrr(T1& t1, T2& t2, T3& t3) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_rrr<node_type>(t1, t2, t3);
+            result = (new node_type(t1, t2, t3));
             result->node_depth();
             return result;
          }
@@ -20043,7 +19492,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_rrrr(T1& t1, T2& t2, T3& t3, T4& t4) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_rrrr<node_type>(t1, t2, t3, t4);
+            result = (new node_type(t1, t2, t3, t4));
             result->node_depth();
             return result;
          }
@@ -20053,7 +19502,7 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_rrrrr(T1& t1, T2& t2, T3& t3, T4& t4, T5& t5) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_rrrrr<node_type>(t1, t2, t3, t4, t5);
+            result = (new node_type(t1, t2, t3, t4, t5));
             result->node_depth();
             return result;
          }
@@ -20064,7 +19513,7 @@ namespace exprtk
                                                                           const T3& t3) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_ccc<node_type>(t1, t2, t3);
+            result = (new node_type(t1, t2, t3));
             result->node_depth();
             return result;
          }
@@ -20076,7 +19525,7 @@ namespace exprtk
                                                                           const T3& t3, const T4& t4) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_cccc<node_type>(t1, t2, t3, t4);
+            result = (new node_type(t1, t2, t3, t4));
             result->node_depth();
             return result;
          }
@@ -20089,7 +19538,7 @@ namespace exprtk
                                                                           const T5& t5) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_ccccc<node_type>(t1, t2, t3, t4, t5);
+            result = (new node_type(t1, t2, t3, t4, t5));
             result->node_depth();
             return result;
          }
@@ -20102,7 +19551,7 @@ namespace exprtk
                                                                           const T5& t5, const T6& t6) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_cccccc<node_type>(t1, t2, t3, t4, t5, t6);
+            result = (new node_type(t1, t2, t3, t4, t5, t6));
             result->node_depth();
             return result;
          }
@@ -20117,7 +19566,7 @@ namespace exprtk
                                                                           const T7& t7) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_ccccccc<node_type>(t1, t2, t3, t4, t5, t6, t7);
+            result = (new node_type(t1, t2, t3, t4, t5, t6, t7));
             result->node_depth();
             return result;
          }
@@ -20133,7 +19582,7 @@ namespace exprtk
                                                                           const T7& t7, const T8& t8) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_cccccccc<node_type>(t1, t2, t3, t4, t5, t6, t7, t8);
+            result = (new node_type(t1, t2, t3, t4, t5, t6, t7, t8));
             result->node_depth();
             return result;
          }
@@ -20150,7 +19599,7 @@ namespace exprtk
                                                                           const T9& t9) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_ccccccccc<node_type>(t1, t2, t3, t4, t5, t6, t7, t8, t9);
+            result = (new node_type(t1, t2, t3, t4, t5, t6, t7, t8, t9));
             result->node_depth();
             return result;
          }
@@ -20168,7 +19617,7 @@ namespace exprtk
                                                                           const T9& t9, const T10& t10) const
          {
             expression_node<typename node_type::value_type>*
-            result = arena_new_cccccccccc<node_type>(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10);
+            result = (new node_type(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10));
             result->node_depth();
             return result;
          }
@@ -20177,19 +19626,8 @@ namespace exprtk
                    typename T1, typename T2, typename T3>
          inline expression_node<typename node_type::value_type>* allocate_type(T1 t1, T2 t2, T3 t3) const
          {
-            expression_node<typename node_type::value_type>* result;
-            if (arena_)
-            {
-               void* mem = arena_->allocate(sizeof(node_type), alignof(node_type));
-               if (mem)
-               {
-                  result = ::new (mem) node_type(t1, t2, t3);
-                  mark_arena_node(static_cast<node_type*>(result));
-                  result->node_depth();
-                  return result;
-               }
-            }
-            result = new node_type(t1, t2, t3);
+            expression_node<typename node_type::value_type>*
+            result = (new node_type(t1, t2, t3));
             result->node_depth();
             return result;
          }
@@ -20200,19 +19638,8 @@ namespace exprtk
          inline expression_node<typename node_type::value_type>* allocate_type(T1 t1, T2 t2,
                                                                                T3 t3, T4 t4) const
          {
-            expression_node<typename node_type::value_type>* result;
-            if (arena_)
-            {
-               void* mem = arena_->allocate(sizeof(node_type), alignof(node_type));
-               if (mem)
-               {
-                  result = ::new (mem) node_type(t1, t2, t3, t4);
-                  mark_arena_node(static_cast<node_type*>(result));
-                  result->node_depth();
-                  return result;
-               }
-            }
-            result = new node_type(t1, t2, t3, t4);
+            expression_node<typename node_type::value_type>*
+            result = (new node_type(t1, t2, t3, t4));
             result->node_depth();
             return result;
          }
@@ -20225,19 +19652,8 @@ namespace exprtk
                                                                                T3 t3, T4 t4,
                                                                                T5 t5) const
          {
-            expression_node<typename node_type::value_type>* result;
-            if (arena_)
-            {
-               void* mem = arena_->allocate(sizeof(node_type), alignof(node_type));
-               if (mem)
-               {
-                  result = ::new (mem) node_type(t1, t2, t3, t4, t5);
-                  mark_arena_node(static_cast<node_type*>(result));
-                  result->node_depth();
-                  return result;
-               }
-            }
-            result = new node_type(t1, t2, t3, t4, t5);
+            expression_node<typename node_type::value_type>*
+            result = (new node_type(t1, t2, t3, t4, t5));
             result->node_depth();
             return result;
          }
@@ -20250,19 +19666,8 @@ namespace exprtk
                                                                                T3 t3, T4 t4,
                                                                                T5 t5, T6 t6) const
          {
-            expression_node<typename node_type::value_type>* result;
-            if (arena_)
-            {
-               void* mem = arena_->allocate(sizeof(node_type), alignof(node_type));
-               if (mem)
-               {
-                  result = ::new (mem) node_type(t1, t2, t3, t4, t5, t6);
-                  mark_arena_node(static_cast<node_type*>(result));
-                  result->node_depth();
-                  return result;
-               }
-            }
-            result = new node_type(t1, t2, t3, t4, t5, t6);
+            expression_node<typename node_type::value_type>*
+            result = (new node_type(t1, t2, t3, t4, t5, t6));
             result->node_depth();
             return result;
          }
@@ -20276,19 +19681,8 @@ namespace exprtk
                                                                                T5 t5, T6 t6,
                                                                                T7 t7) const
          {
-            expression_node<typename node_type::value_type>* result;
-            if (arena_)
-            {
-               void* mem = arena_->allocate(sizeof(node_type), alignof(node_type));
-               if (mem)
-               {
-                  result = ::new (mem) node_type(t1, t2, t3, t4, t5, t6, t7);
-                  mark_arena_node(static_cast<node_type*>(result));
-                  result->node_depth();
-                  return result;
-               }
-            }
-            result = new node_type(t1, t2, t3, t4, t5, t6, t7);
+            expression_node<typename node_type::value_type>*
+            result = (new node_type(t1, t2, t3, t4, t5, t6, t7));
             result->node_depth();
             return result;
          }
@@ -20300,7 +19694,7 @@ namespace exprtk
                           "type: %03d addr: %p\n",
                           static_cast<int>(e->type()),
                           reinterpret_cast<void*>(e)));
-            e->destroy_self();
+            delete e;
             e = 0;
          }
       };
@@ -22502,7 +21896,6 @@ namespace exprtk
          : ref_count(0)
          , expr     (0)
          , results  (0)
-         , arena    (0)
          , retinv_null(false)
          , return_invoked(&retinv_null)
          {}
@@ -22511,7 +21904,6 @@ namespace exprtk
          : ref_count(1)
          , expr     (e)
          , results  (0)
-         , arena    (0)
          , retinv_null(false)
          , return_invoked(&retinv_null)
          {}
@@ -22529,15 +21921,8 @@ namespace exprtk
                {
                   switch (local_data_list[i].type)
                   {
-                     case e_expr      :
-                        {
-                           expression_ptr eptr = reinterpret_cast<expression_ptr>(local_data_list[i].pointer);
-                           if (eptr)
-                           {
-                              eptr->destroy_self();
-                           }
-                        }
-                        break;
+                     case e_expr      : delete reinterpret_cast<expression_ptr>(local_data_list[i].pointer);
+                                        break;
 
                      case e_vecholder : delete reinterpret_cast<vector_holder_ptr>(local_data_list[i].pointer);
                                         break;
@@ -22560,10 +21945,6 @@ namespace exprtk
             {
                delete results;
             }
-
-            // Arena is destroyed last; node destructors have already been called
-            // by destroy_node() above, so it is safe to bulk-free the pages now.
-            delete arena;
          }
 
          static inline cntrl_blck_ptr_t create(expression_ptr e)
@@ -22591,7 +21972,6 @@ namespace exprtk
          expression_ptr expr;
          local_data_list_t local_data_list;
          results_context_t* results;
-         details::arena_allocator* arena;
          bool  retinv_null;
          bool* return_invoked;
 
@@ -22847,17 +22227,6 @@ namespace exprtk
          if (control_block_)
          {
             control_block_->return_invoked = retinvk_ptr;
-         }
-      }
-
-      inline void set_arena(details::arena_allocator* arena)
-      {
-         if (control_block_)
-         {
-            // Transfer ownership of arena to the control_block.
-            // Any previously owned arena is discarded (should not happen in practice).
-            delete control_block_->arena;
-            control_block_->arena = arena;
          }
       }
 
@@ -23524,18 +22893,18 @@ namespace exprtk
             switch (se.type)
             {
                case scope_element::e_literal    : delete reinterpret_cast<T*>(se.data);
-                                                  free_node_ptr(se.var_node);
+                                                  delete se.var_node;
                                                   break;
 
                case scope_element::e_variable   : delete reinterpret_cast<T*>(se.data);
-                                                  free_node_ptr(se.var_node);
+                                                  delete se.var_node;
                                                   break;
 
                case scope_element::e_vector     : delete[] reinterpret_cast<T*>(se.data);
                                                   delete se.vec_node;
                                                   break;
 
-               case scope_element::e_vecelem    : free_node_ptr(se.var_node);
+               case scope_element::e_vecelem    : delete se.var_node;
                                                   break;
 
                #ifndef exprtk_disable_string_capabilities
@@ -23548,15 +22917,6 @@ namespace exprtk
             }
 
             se.clear();
-         }
-
-         inline void free_node_ptr(expression_node_ptr& node)
-         {
-            if (node)
-            {
-               node->destroy_self();
-               node = 0;
-            }
          }
 
          inline void cleanup()
@@ -25494,35 +24854,6 @@ namespace exprtk
             return false;
          }
 
-         details::arena_allocator* arena = new details::arena_allocator();
-         node_allocator_.set_arena(arena);
-
-         struct scoped_arena_cleanup
-         {
-            scoped_arena_cleanup(details::node_allocator& node_allocator,
-                                 details::arena_allocator*& arena)
-            : node_allocator_(node_allocator)
-            , arena_(arena)
-            {}
-
-            ~scoped_arena_cleanup()
-            {
-               node_allocator_.set_arena(0);
-               delete arena_;
-               arena_ = 0;
-            }
-
-            inline void release()
-            {
-               node_allocator_.set_arena(0);
-               arena_ = 0;
-            }
-
-         private:
-            details::node_allocator&   node_allocator_;
-            details::arena_allocator*& arena_;
-         } arena_cleanup(node_allocator_, arena);
-
          expression_generator_.set_allocator(node_allocator_);
 
          if (expression_string.empty())
@@ -25594,8 +24925,6 @@ namespace exprtk
 
             expr.set_expression(e);
             expr.set_retinvk(retinvk_ptr);
-            expr.set_arena(arena);
-            arena_cleanup.release();
 
             register_local_vars(expr);
             register_return_results(expr);
@@ -25621,7 +24950,6 @@ namespace exprtk
             dec_.clear    ();
             sem_.cleanup  ();
             return_cleanup();
-
             expr = expression_t();
 
             return false;

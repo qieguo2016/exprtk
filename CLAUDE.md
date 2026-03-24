@@ -69,16 +69,20 @@ The main runtime flow is:
 
 ## Benchmark progress
 
-1. `make build` — sync top-level `exprtk.hpp` from `src/` when headers changed.
-2. `make benchmark` — produce `./bin/exprtk_benchmark` (uses repo-root include path).
-3. Append several timed runs to one log (example: 5 rounds, 1000 iterations each, feature is arena_allocator):
+1. Before optimizations: `make build && make -B benchmark && mv ./bin/exprtk_benchmark ./bin/exprtk_benchmark_base` (uses the `benchmark` Makefile target, `-I.` and root `exprtk.hpp`; not the same as `make exprtk_benchmark`, which uses `-Isrc` and modular headers).
+2. After optimizations (modified files of `src`): `make build && make -B benchmark`.
+3. Append several timed runs to one log (example: 5 rounds, 1000 iterations each for arena_allocator optimization):
 
    ```bash
+   doc='docs/benchmark_arena_allocator.md'
    for i in $(seq 1 5); do
-     echo "## Base $i" >> benchmark_arena_allocator.md
-     ./bin/exprtk_benchmark 1000 >> benchmark_arena_allocator.md 2>&1
-     echo >> benchmark_arena_allocator.md
+     echo "### Base $i" >> ${doc}
+     ./bin/exprtk_benchmark_base 1000 >> ${doc} 2>&1
+     echo >> ${doc}
+
+     echo "### Optimized $i" >> ${doc}
+     ./bin/exprtk_benchmark 1000 >> ${doc} 2>&1
+     echo >> ${doc}
    done
    ```
-
-4. After optimizations, repeat steps 1–2 and run the same loop with a new heading prefix (e.g. `## Optimized $i`) so before/after blocks stay in one file.
+4. Use `scripts/benchmark_stats.py` to analyze the difference and have LLM to make a summary.
